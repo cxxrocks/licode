@@ -51,6 +51,7 @@ class SyntheticInput : public MediaSource, public FeedbackSink, public std::enab
   int deliverFeedback_(std::shared_ptr<dataPacket> fb_packet) override;
   void sendVideoframe(bool is_keyframe, bool is_marker, uint32_t size);
   void sendAudioFrame(uint32_t size);
+  void sendSr();
   uint32_t getRandomValue(uint32_t average, uint32_t variation);
   void scheduleEvery(duration period);
 
@@ -70,6 +71,7 @@ class SyntheticInput : public MediaSource, public FeedbackSink, public std::enab
   bool running_;
   uint32_t video_seq_number_;
   uint32_t audio_seq_number_;
+  uint32_t video_octects_;
   uint32_t video_ssrc_;
   uint32_t audio_ssrc_;
   uint32_t total_packets_nacked_;
@@ -77,6 +79,7 @@ class SyntheticInput : public MediaSource, public FeedbackSink, public std::enab
   size_t audio_pt_;
   time_point next_video_frame_time_;
   time_point next_audio_frame_time_;
+  time_point next_sr_time_;
   time_point last_video_keyframe_time_;
   uint8_t consecutive_ticks_;
   std::atomic<bool> keyframe_requested_;

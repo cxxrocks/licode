@@ -28,6 +28,10 @@ class StatNode {
     node_map_.insert(std::make_pair(key, std::make_shared<Node>(std::forward<Node>(stat))));
   }
 
+  void removeStat(const std::string& key) {
+    node_map_.erase(key);
+  }
+
   virtual bool hasChild(std::string name) { return node_map_.find(name) != node_map_.end(); }
 
   virtual bool hasChild(uint64_t value) { return hasChild(std::to_string(value)); }

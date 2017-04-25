@@ -21,6 +21,7 @@ static constexpr uint32_t kDefaultVideoBitrate = 300000;  // bps
 static constexpr uint32_t kDefaultAudioBitrate = 30000;  // bps
 static constexpr uint32_t kVideoSampleRate = 90000;  // Hz
 static constexpr uint32_t kAudioSampleRate = 48000;  // Hz
+static constexpr auto kSrInterval = std::chrono::milliseconds(5000); // minimum value recommended by RFC 3550 for fixed interval
 
 namespace erizo {
 DEFINE_LOGGER(SyntheticInput, "media.SyntheticInput");
@@ -48,6 +49,7 @@ SyntheticInput::SyntheticInput(SyntheticInputConfig config,
       audio_pt_{kOpusPayloadType},
       next_video_frame_time_{clock_->now() + video_period_},
       next_audio_frame_time_{clock_->now() + audio_period_},
+      next_sr_time_{clock_->now() + kSrInterval},
       last_video_keyframe_time_{clock_->now()},
       consecutive_ticks_{0},
       keyframe_requested_{true} {
@@ -65,6 +67,9 @@ void SyntheticInput::start() {
   running_ = true;
   std::weak_ptr<SyntheticInput> weak_this = shared_from_this();
   worker_->scheduleEvery([weak_this] {
+    if (weak_this.expired()) {
+      return false;
+    }
     if (auto this_ptr = weak_this.lock()) {
       if (!this_ptr->running_) {
         return false;
@@ -90,6 +95,7 @@ void SyntheticInput::tick() {
       is_keyframe = true;
       frame_size = getRandomValue(video_avg_keyframe_size_, video_dev_keyframe_size_);
     }
+    video_octects_ += frame_size;
     while (frame_size > kMaxPacketSize) {
       sendVideoframe(is_keyframe, false, kMaxPacketSize);
       is_keyframe = false;
@@ -99,8 +105,12 @@ void SyntheticInput::tick() {
 
     next_video_frame_time_ += video_period_;
   }
+  if (now >= next_sr_time_) {
+    sendSr();
+    next_sr_time_ += kSrInterval;
+  }
   now = clock_->now();
-  if ((next_video_frame_time_ <= now || next_audio_frame_time_ <= now) && consecutive_ticks_ < kMaxConsecutiveTicks) {
+  if ((next_video_frame_time_ <= now || next_audio_frame_time_ <= now || next_sr_time_ <= now) && consecutive_ticks_ < kMaxConsecutiveTicks) {
     consecutive_ticks_++;
     tick();
   } else {
@@ -218,4 +228,25 @@ uint32_t SyntheticInput::getRandomValue(uint32_t average, uint32_t deviation) {
   std::normal_distribution<> distr(average, deviation);
   return std::round(distr(generator_));
 }
+
+void SyntheticInput::sendSr() {
+  auto nowMs = ClockUtils::timePointToMs(clock_->now());
+  uint64_t ntpMsw = nowMs / 1000;
+  uint64_t ntpLsw = static_cast<uint32_t>((nowMs % 1000) * 1000000000.0 / 232);
+  RtcpHeader sr;
+  sr.setPacketType(RTCP_Sender_PT);
+  sr.setBlockCount(1);
+  sr.setLength(4);
+  sr.setSSRC(video_ssrc_);
+  sr.setNtpTimestamp((ntpMsw << 32) + ntpLsw);
+  sr.setPacketsSent(video_seq_number_);
+  sr.setOctetsSent(video_octects_);
+  char *buf = reinterpret_cast<char*>(&sr);
+  int len = (sr.getLength() + 1) * 4;
+
+  if (video_sink_) {
+    video_sink_->deliverVideoData(std::make_shared<dataPacket>(0, buf, len, VIDEO_PACKET));
+  }
+}
+
 }  // namespace erizo
